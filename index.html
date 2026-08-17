@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Color Fish Feast</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    overflow: hidden;
+    font-family: Arial, Helvetica, sans-serif;
+    background: #071b33;
+    color: white;
+  }
+  #game {
+    display: block;
+    width: 100vw;
+    height: 100vh;
+    cursor: none;
+  }
+  #hud {
+    position: fixed;
+    top: 16px;
+    left: 16px;
+    right: 16px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    pointer-events: none;
+    z-index: 2;
+  }
+  .panel {
+    background: rgba(2, 20, 40, .72);
+    border: 1px solid rgba(255,255,255,.18);
+    border-radius: 14px;
+    padding: 10px 16px;
+    backdrop-filter: blur(8px);
+    box-shadow: 0 8px 25px rgba(0,0,0,.2);
+  }
+  #help {
+    position: fixed;
+    bottom: 18px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(2,20,40,.7);
+    border-radius: 12px;
+    padding: 9px 16px;
+    font-size: 14px;
+    color: #d8efff;
+    pointer-events: none;
+  }
+  #overlay {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(1, 12, 25, .55);
+    z-index: 5;
+  }
+  #card {
+    width: min(520px, 90vw);
+    text-align: center;
+    padding: 34px;
+    border-radius: 24px;
+    background: linear-gradient(145deg, #0c3557, #08233e);
+    border: 1px solid rgba(255,255,255,.18);
+    box-shadow: 0 25px 70px rgba(0,0,0,.45);
+  }
+  h1 { margin: 0 0 8px; font-size: 42px; }
+  p { color: #cbe7f8; line-height: 1.55; }
+  button {
+    border: 0;
+    border-radius: 999px;
+    padding: 13px 28px;
+    font-size: 17px;
+    font-weight: bold;
+    color: #06223c;
+    background: #6fe7ff;
+    cursor: pointer;
+  }
+  button:hover { transform: translateY(-1px); }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<div id="hud">
+  <div class="panel">🐟 <b>Color:</b> <span id="colorName">Blue</span></div>
+  <div class="panel">⭐ <b>Score:</b> <span id="score">0</span> &nbsp; | &nbsp; 🏆 <b>Level:</b> <span id="level">1</span></div>
+</div>
+
+<div id="help">Move with mouse / touch / arrow keys • Eat only smaller fish of YOUR color!</div>
+
+<div id="overlay">
+  <div id="card">
+    <h1>🐠 Color Fish Feast</h1>
+    <p>
+      You are the big fish. Eat smaller fish that have the <b>same color</b> as you.
+      Eating the wrong color costs a life. Survive, grow, and reach the highest level!
+    </p>
+    <button id="startBtn">Start Fishing 🎣</button>
+  </div>
+</div>
+
+<script>
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+
+let W, H, dpr;
+function resize() {
+  dpr = Math.min(window.devicePixelRatio || 1, 2);
+  W = window.innerWidth;
+  H = window.innerHeight;
+  canvas.width = W * dpr;
+  canvas.height = H * dpr;
+  canvas.style.width = W + "px";
+  canvas.style.height = H + "px";
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+window.addEventListener("resize", resize);
+resize();
+
+const colors = [
+  {name:"Blue", value:"#36b9ff"},
+  {name:"Red", value:"#ff5577"},
+  {name:"Yellow", value:"#ffd447"},
+  {name:"Green", value:"#55df91"},
+  {name:"Purple", value:"#b77cff"}
+];
+
+let player, fish, bubbles, particles;
+let score = 0, level = 1, lives = 3;
+let running = false, lastTime = 0, spawnTimer = 0;
+let keys = {};
+let target = {x: W/2, y: H/2};
+
+function rand(a,b){ return a + Math.random()*(b-a); }
+function clamp(v,a,b){ return Math.max(a, Math.min(b,v)); }
+
+function createPlayer() {
+  const c = colors[Math.floor(Math.random()*colors.length)];
+  player = {
+    x: W/2, y: H/2, r: 30,
+    color: c,
+    speed: 330,
+    vx: 0, vy: 0,
+    angle: 0
+  };
+  document.getElementById("colorName").textContent = c.name;
+  document.getElementById("colorName").style.color = c.value;
+}
+
+function spawnFish() {
+  const c = colors[Math.floor(Math.random()*colors.length)];
+  const side = Math.floor(Math.random()*4);
+  let x, y;
+  if(side===0){x=-50;y=rand(60,H-40);}
+  if(side===1){x=W+50;y=rand(60,H-40);}
+  if(side===2){x=rand(0,W);y=-50;}
+  if(side===3){x=rand(0,W);y=H+50;}
+
+  const maxR = Math.min(24 + level*1.4, 48);
+  const r = rand(10, maxR);
+  const speed = rand(35, 85) + level*5;
+  fish.push({
+    x,y,r,color:c,
+    vx: rand(-1,1)*speed,
+    vy: rand(-1,1)*speed,
+    wobble: rand(0,Math.PI*2),
+    phase: rand(0,Math.PI*2)
+  });
+}
+
+function addParticles(x,y,color,n=12) {
+  for(let i=0;i<n;i++){
+    const a=rand(0,Math.PI*2), s=rand(40,180);
+    particles.push({
+      x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,
+      life:rand(.4,.9),max:.9,color
+    });
+  }
+}
+
+function resetGame() {
+  score=0; level=1; lives=3;
+  fish=[]; bubbles=[]; particles=[];
+  createPlayer();
+  for(let i=0;i<12;i++) spawnFish();
+  updateHud();
+}
+
+function updateHud(){
+  document.getElementById("score").textContent=score;
+  document.getElementById("level").textContent=level;
+}
+
+function eat(f) {
+  if(f.color.name === player.color.name && f.r < player.r) {
+    score += Math.max(10, Math.round(f.r));
+    player.r = Math.min(68, player.r + 0.8);
+    addParticles(f.x,f.y,f.color.value,18);
+    if(score >= level*150) {
+      level++;
+      for(let i=0;i<3;i++) spawnFish();
+    }
+    return true;
+  }
+  return false;
+}
+
+function hitWrongFish(f) {
+  if(f.color.name !== player.color.name && f.r < player.r*1.15) {
+    lives--;
+    addParticles(player.x,player.y,"#ffffff",28);
+    player.r = Math.max(24, player.r - 5);
+    player.x = W/2; player.y=H/2;
+    if(lives<=0) gameOver();
+    return true;
+  }
+  return false;
+}
+
+function gameOver() {
+  running=false;
+  document.getElementById("overlay").classList.remove("hidden");
+  document.querySelector("#card h1").textContent="🌊 Game Over!";
+  document.querySelector("#card p").innerHTML =
+    `Final score: <b>${score}</b><br>Level reached: <b>${level}</b><br><br>` +
+    `Tip: chase the smaller fish that match your color.`;
+  document.getElementById("startBtn").textContent="Play Again 🎣";
+}
+
+function update(dt) {
+  // Keyboard movement
+  let dx=0,dy=0;
+  if(keys["ArrowLeft"]||keys["a"]) dx--;
+  if(keys["ArrowRight"]||keys["d"]) dx++;
+  if(keys["ArrowUp"]||keys["w"]) dy--;
+  if(keys["ArrowDown"]||keys["s"]) dy++;
+  if(dx||dy){
+    const len=Math.hypot(dx,dy);
+    target.x=player.x+dx/len*180;
+    target.y=player.y+dy/len*180;
+  }
+
+  const tx=target.x-player.x, ty=target.y-player.y;
+  const dist=Math.hypot(tx,ty);
+  if(dist>4){
+    const speed=player.speed;
+    player.vx += (tx/dist*speed-player.vx)*Math.min(1,dt*7);
+    player.vy += (ty/dist*speed-player.vy)*Math.min(1,dt*7);
+  } else {
+    player.vx*=.9; player.vy*=.9;
+  }
+  player.x=clamp(player.x+player.vx*dt,player.r,W-player.r);
+  player.y=clamp(player.y+player.vy*dt,player.r+45,H-player.r);
+
+  if(Math.hypot(player.vx,player.vy)>10)
+    player.angle=Math.atan2(player.vy,player.vx);
+
+  spawnTimer += dt;
+  const interval=Math.max(.25,1.0-level*.055);
+  if(spawnTimer>interval){
+    spawnTimer=0; spawnFish();
+  }
+
+  for(let i=fish.length-1;i>=0;i--){
+    const f=fish[i];
+    f.wobble += dt*2;
+    f.x += f.vx*dt;
+    f.y += f.vy*dt + Math.sin(f.wobble+f.phase)*8*dt;
+
+    const d=Math.hypot(player.x-f.x,player.y-f.y);
+    if(d < player.r+f.r){
+      if(eat(f) || hitWrongFish(f)) fish.splice(i,1);
+      continue;
+    }
+    if(f.x<-100||f.x>W+100||f.y<-100||f.y>H+100) fish.splice(i,1);
+  }
+
+  // bubbles
+  if(Math.random()<dt*5) bubbles.push({
+    x:rand(0,W),y:H+10,r:rand(2,7),speed:rand(20,60),life:rand(4,9)
+  });
+  for(let i=bubbles.length-1;i>=0;i--){
+    const b=bubbles[i];
+    b.y-=b.speed*dt;b.life-=dt;
+    if(b.life<=0||b.y<-20)bubbles.splice(i,1);
+  }
+
+  for(let i=particles.length-1;i>=0;i--){
+    const p=particles[i];
+    p.x+=p.vx*dt;p.y+=p.vy*dt;p.vy+=100*dt;p.life-=dt;
+    if(p.life<=0)particles.splice(i,1);
+  }
+}
+
+function drawFish(f, isPlayer=false) {
+  ctx.save();
+  ctx.translate(f.x,f.y);
+  let angle = isPlayer ? f.angle : Math.atan2(f.vy,f.vx);
+  ctx.rotate(angle);
+
+  // tail
+  ctx.beginPath();
+  ctx.moveTo(-f.r*.65,0);
+  ctx.lineTo(-f.r*1.35,-f.r*.7);
+  ctx.lineTo(-f.r*1.15,0);
+  ctx.lineTo(-f.r*1.35,f.r*.7);
+  ctx.closePath();
+  ctx.fillStyle=f.color.value;
+  ctx.globalAlpha=.82;
+  ctx.fill();
+
+  // body
+  ctx.globalAlpha=1;
+  ctx.beginPath();
+  ctx.ellipse(0,0,f.r*1.15,f.r*.68,0,0,Math.PI*2);
+  ctx.fillStyle=f.color.value;
+  ctx.fill();
+
+  // highlight
+  ctx.beginPath();
+  ctx.ellipse(-f.r*.25,-f.r*.22,f.r*.45,f.r*.13,0,0,Math.PI*2);
+  ctx.fillStyle="rgba(255,255,255,.32)";
+  ctx.fill();
+
+  // eye
+  ctx.beginPath();
+  ctx.arc(f.r*.65,-f.r*.2,f.r*.12,0,Math.PI*2);
+  ctx.fillStyle="#fff";ctx.fill();
+  ctx.beginPath();
+  ctx.arc(f.r*.68,-f.r*.2,f.r*.055,0,Math.PI*2);
+  ctx.fillStyle="#06182a";ctx.fill();
+
+  // mouth
+  ctx.beginPath();
+  ctx.arc(f.r*1.02,.13*f.r,.12*f.r,.2,Math.PI-.2);
+  ctx.strokeStyle="#08233e";ctx.lineWidth=2;ctx.stroke();
+
+  if(isPlayer){
+    ctx.beginPath();
+    ctx.arc(0,0,f.r+7,0,Math.PI*2);
+    ctx.strokeStyle="rgba(255,255,255,.35)";
+    ctx.lineWidth=2;ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function draw() {
+  // water gradient
+  const g=ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,"#0876a9");
+  g.addColorStop(.55,"#07527d");
+  g.addColorStop(1,"#032c50");
+  ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+
+  // light rays
+  ctx.globalAlpha=.08;
+  for(let i=0;i<8;i++){
+    ctx.beginPath();
+    ctx.moveTo(i*W/7,-10);
+    ctx.lineTo(i*W/7+150,H*.75);
+    ctx.lineTo(i*W/7+300,H*.75);
+    ctx.lineTo(i*W/7+60,-10);
+    ctx.fillStyle="#fff";ctx.fill();
+  }
+  ctx.globalAlpha=1;
+
+  // seaweed
+  ctx.globalAlpha=.3;
+  for(let x=10;x<W;x+=70){
+    ctx.beginPath();
+    ctx.moveTo(x,H);
+    ctx.quadraticCurveTo(x-20,H-70,x+5,H-120);
+    ctx.quadraticCurveTo(x+25,H-55,x+18,H);
+    ctx.fillStyle="#0a8d72";ctx.fill();
+  }
+  ctx.globalAlpha=1;
+
+  for(const b of bubbles){
+    ctx.globalAlpha=Math.min(.5,b.life/3);
+    ctx.beginPath();ctx.arc(b.x,b.y,b.r,0,Math.PI*2);
+    ctx.strokeStyle="#c8f3ff";ctx.stroke();
+  }
+  ctx.globalAlpha=1;
+
+  for(const f of fish) drawFish(f);
+  if(player) drawFish(player,true);
+
+  for(const p of particles){
+    ctx.globalAlpha=Math.max(0,p.life/p.max);
+    ctx.beginPath();ctx.arc(p.x,p.y,3,0,Math.PI*2);
+    ctx.fillStyle=p.color;ctx.fill();
+  }
+  ctx.globalAlpha=1;
+
+  // lives
+  ctx.font="18px Arial";
+  ctx.fillStyle="#fff";
+  ctx.fillText("❤️ ".repeat(Math.max(0,lives)),16,75);
+}
+
+function loop(t){
+  const dt=Math.min(.033,(t-lastTime)/1000||0);
+  lastTime=t;
+  if(running) update(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+
+canvas.addEventListener("mousemove",e=>{
+  target.x=e.clientX; target.y=e.clientY;
+});
+canvas.addEventListener("touchmove",e=>{
+  e.preventDefault();
+  target.x=e.touches[0].clientX;
+  target.y=e.touches[0].clientY;
+},{passive:false});
+
+window.addEventListener("keydown",e=>{
+  keys[e.key]=true;
+  if(["ArrowUp","ArrowDown","ArrowLeft","ArrowRight"].includes(e.key)) e.preventDefault();
+});
+window.addEventListener("keyup",e=>keys[e.key]=false);
+
+document.getElementById("startBtn").addEventListener("click",()=>{
+  document.getElementById("overlay").classList.add("hidden");
+  document.querySelector("#card h1").textContent="🐠 Color Fish Feast";
+  document.querySelector("#card p").innerHTML =
+    `You are the big fish. Eat smaller fish that have the <b>same color</b> as you.
+     Eating the wrong color costs a life. Survive, grow, and reach the highest level!`;
+  document.getElementById("startBtn").textContent="Start Fishing 🎣";
+  resetGame();
+  running=true;
+});
+
+resetGame();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
