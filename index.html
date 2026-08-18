@@ -38,6 +38,22 @@
     backdrop-filter: blur(8px);
     box-shadow: 0 8px 25px rgba(0,0,0,.2);
   }
+  #levelUp {
+    position: fixed;
+    top: 92px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 4;
+    padding: 12px 24px;
+    border-radius: 999px;
+    background: rgba(2, 20, 40, .86);
+    border: 2px solid rgba(111, 231, 255, .65);
+    color: #fff;
+    font-size: 20px;
+    font-weight: 800;
+    box-shadow: 0 10px 35px rgba(0,0,0,.3);
+  }
+
   #help {
     position: fixed;
     bottom: 18px;
@@ -70,6 +86,29 @@
   }
   h1 { margin: 0 0 8px; font-size: 42px; }
   p { color: #cbe7f8; line-height: 1.55; }
+  .colorChoices {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 8px;
+    margin-bottom: 18px;
+  }
+  .colorChoice {
+    padding: 9px 13px;
+    font-size: 14px;
+    background: rgba(255,255,255,.09);
+    color: #fff;
+    border: 2px solid transparent;
+  }
+  .colorChoice:hover {
+    background: rgba(255,255,255,.16);
+    transform: translateY(-1px);
+  }
+  .colorChoice.selected {
+    border-color: var(--fish-color);
+    box-shadow: 0 0 0 2px rgba(255,255,255,.25), 0 0 18px var(--fish-color);
+  }
+
   button {
     border: 0;
     border-radius: 999px;
@@ -82,25 +121,46 @@
   }
   button:hover { transform: translateY(-1px); }
   .hidden { display: none !important; }
+  #scorePanel.scoreFlash {
+    transform: scale(1.08);
+    transition: transform .12s ease;
+  }
+  #score {
+    display: inline-block;
+    min-width: 34px;
+    text-align: center;
+    font-size: 20px;
+  }
 </style>
 </head>
 <body>
 <canvas id="game"></canvas>
 
-<div id="hud">
+<div id="hud" aria-live="polite">
   <div class="panel">🐟 <b>Color:</b> <span id="colorName">Blue</span></div>
-  <div class="panel">⭐ <b>Score:</b> <span id="score">0</span> &nbsp; | &nbsp; 🏆 <b>Level:</b> <span id="level">1</span></div>
+  <div class="panel" id="scorePanel">⭐ <b>LIVE SCORE:</b> <span id="score">0</span> &nbsp; | &nbsp; 🏆 <b>LEVEL:</b> <span id="level">1</span></div>
 </div>
 
 <div id="help">Move with mouse / touch / arrow keys • Eat only smaller fish of YOUR color!</div>
+<div id="levelUp" class="hidden">🎉 LEVEL <span id="levelUpNumber">2</span> COMPLETE! 🎉</div>
 
 <div id="overlay">
   <div id="card">
     <h1>🐠 Color Fish Feast</h1>
     <p>
-      You are the big fish. Eat smaller fish that have the <b>same color</b> as you.
+      Choose your fish color, then eat smaller fish that have the <b>same color</b> as you.
       Eating the wrong color costs a life. Survive, grow, and reach the highest level!
     </p>
+    <div id="colorPicker">
+      <div style="font-weight:700;margin:18px 0 10px;">Choose your fish color:</div>
+      <div class="colorChoices">
+        <button class="colorChoice" data-color="Blue" style="--fish-color:#36b9ff;">🔵 Blue</button>
+        <button class="colorChoice" data-color="Red" style="--fish-color:#ff5577;">🔴 Red</button>
+        <button class="colorChoice" data-color="Yellow" style="--fish-color:#ffd447;">🟡 Yellow</button>
+        <button class="colorChoice" data-color="Green" style="--fish-color:#55df91;">🟢 Green</button>
+        <button class="colorChoice" data-color="Purple" style="--fish-color:#b77cff;">🟣 Purple</button>
+      </div>
+    </div>
     <button id="startBtn">Start Fishing 🎣</button>
   </div>
 </div>
@@ -141,7 +201,8 @@ function rand(a,b){ return a + Math.random()*(b-a); }
 function clamp(v,a,b){ return Math.max(a, Math.min(b,v)); }
 
 function createPlayer() {
-  const c = colors[Math.floor(Math.random()*colors.length)];
+  const selectedName = window.selectedFishColor || "Blue";
+  const c = colors.find(color => color.name === selectedName) || colors[0];
   player = {
     x: W/2, y: H/2, r: 30,
     color: c,
@@ -186,6 +247,7 @@ function addParticles(x,y,color,n=12) {
 
 function resetGame() {
   score=0; level=1; lives=3;
+  document.getElementById("levelUp")?.classList.add("hidden");
   fish=[]; bubbles=[]; particles=[];
   createPlayer();
   for(let i=0;i<12;i++) spawnFish();
@@ -200,10 +262,19 @@ function updateHud(){
 function eat(f) {
   if(f.color.name === player.color.name && f.r < player.r) {
     score += Math.max(10, Math.round(f.r));
+    updateHud();
     player.r = Math.min(68, player.r + 0.8);
     addParticles(f.x,f.y,f.color.value,18);
     if(score >= level*150) {
       level++;
+      updateHud();
+
+      const levelUp = document.getElementById("levelUp");
+      document.getElementById("levelUpNumber").textContent = level;
+      levelUp.classList.remove("hidden");
+      clearTimeout(window.levelUpTimer);
+      window.levelUpTimer = setTimeout(() => levelUp.classList.add("hidden"), 1800);
+
       for(let i=0;i<3;i++) spawnFish();
     }
     return true;
@@ -231,6 +302,7 @@ function gameOver() {
     `Final score: <b>${score}</b><br>Level reached: <b>${level}</b><br><br>` +
     `Tip: chase the smaller fish that match your color.`;
   document.getElementById("startBtn").textContent="Play Again 🎣";
+  document.getElementById("colorPicker").classList.remove("hidden");
 }
 
 function update(dt) {
@@ -407,7 +479,10 @@ function draw() {
 function loop(t){
   const dt=Math.min(.033,(t-lastTime)/1000||0);
   lastTime=t;
-  if(running) update(dt);
+  if(running) {
+    update(dt);
+    updateHud();
+  }
   draw();
   requestAnimationFrame(loop);
 }
@@ -427,11 +502,23 @@ window.addEventListener("keydown",e=>{
 });
 window.addEventListener("keyup",e=>keys[e.key]=false);
 
+document.querySelectorAll(".colorChoice").forEach(btn => {
+  btn.addEventListener("click", () => {
+    window.selectedFishColor = btn.dataset.color;
+    document.querySelectorAll(".colorChoice").forEach(b => b.classList.remove("selected"));
+    btn.classList.add("selected");
+  });
+});
+
+// Blue is selected by default.
+window.selectedFishColor = "Blue";
+document.querySelector('.colorChoice[data-color="Blue"]').classList.add("selected");
+
 document.getElementById("startBtn").addEventListener("click",()=>{
   document.getElementById("overlay").classList.add("hidden");
   document.querySelector("#card h1").textContent="🐠 Color Fish Feast";
   document.querySelector("#card p").innerHTML =
-    `You are the big fish. Eat smaller fish that have the <b>same color</b> as you.
+    `Choose your fish color, then eat smaller fish that have the <b>same color</b> as you.
      Eating the wrong color costs a life. Survive, grow, and reach the highest level!`;
   document.getElementById("startBtn").textContent="Start Fishing 🎣";
   resetGame();
